@@ -168,6 +168,19 @@ class MlmTrainer(Trainer):
         self.total_correct = 0.0
         self.total_denominator = 0.0
 
+class MeanAccumulator:
+    def __init__(self, warmup):
+        self.warmup = warmup
+        self.count=0
+        self.value=0
+
+    def update(self, value, step):
+        if step > self.warmup:
+            self.value+=value
+            self.count+=1
+    
+    def result(self):
+        return self.value/self.count
 
 class BertTrainer(Trainer):
     def __init__(self, args):
@@ -179,6 +192,8 @@ class BertTrainer(Trainer):
         self.total_loss_mlm = 0.0
         self.total_correct_mlm = 0.0
         self.total_denominator = 0.0
+
+        self.acc = MeanAccumulator()
 
     def forward_propagation(self, batch, model):
         src, tgt_mlm, tgt_sp, seg = batch
@@ -202,7 +217,8 @@ class BertTrainer(Trainer):
         done_tokens = self.batch_size * self.seq_length * self.report_steps
         if self.dist_train:
             done_tokens *= self.world_size
-
+        ips = done_tokens / (time.time() - self.start_time)
+        self.acc.update(ips, self.current_step)
         self.logger.info("| {:8d}/{:8d} steps"
               "| {:8.2f} tokens/s"
               "| loss {:7.2f}"
@@ -212,7 +228,7 @@ class BertTrainer(Trainer):
               "| acc_sp: {:3.3f}".format(
                   self.current_step,
                   self.total_steps,
-                  done_tokens / (time.time() - self.start_time),
+                  ips,
                   self.total_loss / self.report_steps,
                   self.total_loss_mlm / self.report_steps,
                   self.total_loss_sp / self.report_steps,
@@ -222,6 +238,8 @@ class BertTrainer(Trainer):
         self.total_loss, self.total_loss_mlm, self.total_loss_sp = 0.0, 0.0, 0.0
         self.total_correct_mlm, self.total_denominator = 0.0, 0.0
         self.total_correct_sp, self.total_instances = 0.0, 0.0
+        if self.current_step == self.total_steps:
+            print(self.acc.result())
 
 
 class AlbertTrainer(BertTrainer):
@@ -507,7 +525,7 @@ def worker(proc_id, gpu_ranks, args, model):
                                     init_method=args.master_ip,
                                     world_size=args.world_size,
                                     rank=rank)
-            model = DistributedDataParallel(model, device_ids=[gpu_id], find_unused_parameters=True)
+            model = DistributedDataParallel(model, device_ids=[gpu_id])
             args.logger.info("Worker %d is training ... " % rank)
         else:
             args.logger.info("Worker is training ...")
