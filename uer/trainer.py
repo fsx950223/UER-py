@@ -193,7 +193,7 @@ class BertTrainer(Trainer):
         self.total_correct_mlm = 0.0
         self.total_denominator = 0.0
 
-        self.acc = MeanAccumulator()
+        self.acc = MeanAccumulator(100)
 
     def forward_propagation(self, batch, model):
         src, tgt_mlm, tgt_sp, seg = batch
